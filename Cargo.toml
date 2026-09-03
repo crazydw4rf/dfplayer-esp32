@@ -2,5 +2,20 @@
 name = "dfplayer-esp32"
 version = "0.1.0"
 edition = "2024"
+description = "A library for communicating with the DFPlayer Mini module"
+keywords = ["dfplayer", "esp32", "IoT"]
+license = "MIT"
+repository = "https://github.com/crazydw4rf/dfplayer-esp32"
 
 [dependencies]
+esp-idf-hal = "0.46"
+anyhow = "1.0"
+thiserror = "2.0"
+log = "0.4"
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "z"
