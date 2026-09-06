@@ -24,16 +24,13 @@ impl<'d> DfPlayer<'d> {
         Self { uart }
     }
 
-    pub fn send_command<T>(&self, command: Command, parameter: T) -> Result<()>
-    where
-        T: TryInto<Parameter>,
-        error::Error: From<T::Error>,
-    {
-        let (param1, param2) = parameter.try_into()?.into();
+    pub fn send_command(&self, command: Command) -> Result<()> {
+        let (param1, param2) = command.parameter()?.into();
+        let command_byte = command.command_byte();
 
         let checksum = (VERSION_BYTE as u16
             + COMMAND_LENGTH as u16
-            + (command as u8) as u16
+            + (command_byte as u8) as u16
             + COMMAND_FEEDBACK as u16
             + param1 as u16
             + param2 as u16)
@@ -43,7 +40,7 @@ impl<'d> DfPlayer<'d> {
             START_BYTE,
             VERSION_BYTE,
             COMMAND_LENGTH,
-            command as u8,
+            command_byte as u8,
             COMMAND_FEEDBACK,
             param1,
             param2,

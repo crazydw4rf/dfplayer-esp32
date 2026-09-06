@@ -1,10 +1,12 @@
+use std::borrow::Cow;
+
 use esp_idf_hal::sys::EspError;
 use thiserror::Error;
 
-#[derive(Error, Debug, Clone, Copy)]
+#[derive(Error, Debug)]
 pub enum Error {
-    #[error("invalid parameter")]
-    InvalidParameter,
+    #[error("invalid command parameter: {0}")]
+    InvalidParameter(Cow<'static, str>),
     #[error("failed to send uart command: {0}")]
     UartSendError(#[from] EspError),
 }

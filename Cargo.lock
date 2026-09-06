@@ -322,7 +322,6 @@ dependencies = [
 name = "dfplayer-esp32"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "esp-idf-hal",
  "log",
  "thiserror 2.0.20",
