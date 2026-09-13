@@ -11,7 +11,6 @@ References and datasheets:
 
 ## TODO
 
-- [ ] implement all dfplayer mini commands.
 - [ ] implement query commands
 - [ ] support `esp-hal` or `no_std`
 - [ ] write proper documentation
