@@ -98,8 +98,8 @@ impl<'d> DfPlayer<'d> {
     }
 
     /// Enables or disables repeat playback for all tracks.
-    pub fn repeat_all(&self, enable: bool) -> Result<()> {
-        self.send_command(Command::RepeatAll(enable))
+    pub fn repeat_all(&self, state: SwitchState) -> Result<()> {
+        self.send_command(Command::RepeatAll(state))
     }
 
     /// Sets the playback source (USB, TF Card, AUX, Sleep, Flash).
@@ -137,13 +137,58 @@ impl<'d> DfPlayer<'d> {
         self.send_command(Command::PlayFromFolder(folder, track))
     }
 
+    /// Plays a track from a specific folder (Folder 1–15, File 1–3000).
+    pub fn play_from_folder_large(&self, folder: u8, track: u16) -> Result<()> {
+        self.send_command(Command::PlayFromFolderLarge(folder, track))
+    }
+
     /// Sets the volume gain (0–31).
-    pub fn set_volume_gain(&self, enable: bool, gain: u8) -> Result<()> {
-        self.send_command(Command::SetVolumeGain(enable, gain))
+    pub fn set_volume_gain(&self, state: SwitchState, gain: u8) -> Result<()> {
+        self.send_command(Command::SetVolumeGain(state, gain))
     }
 
     /// Plays a specific track in the MP3 folder (1–3000).
     pub fn play_from_mp3_folder(&self, track_num: u16) -> Result<()> {
         self.send_command(Command::PlayFromMp3Folder(track_num))
+    }
+
+    /// Plays a specific track in the ADVERT folder (1–3000).
+    pub fn play_from_advert_folder(&self, track_num: u16) -> Result<()> {
+        self.send_command(Command::PlayFromAdvertFolder(track_num))
+    }
+
+    /// Stops the currently playing advertisement and resumes previous playback.
+    pub fn skip_advertisement(&self) -> Result<()> {
+        self.send_command(Command::SkipAdvertisement)
+    }
+
+    /// Stops all playback.
+    pub fn stop_all_playback(&self) -> Result<()> {
+        self.send_command(Command::StopAllPlayback)
+    }
+
+    /// Plays and repeats all tracks in a specific folder (Folder 1–99).
+    pub fn repeat_playback_folder(&self, folder: u8) -> Result<()> {
+        self.send_command(Command::RepeatPlaybackFolder(folder))
+    }
+
+    /// Starts random playback for all tracks.
+    pub fn start_random_playback(&self) -> Result<()> {
+        self.send_command(Command::StartRandomPlayback)
+    }
+
+    /// Enables or disables repeating the currently playing track.
+    pub fn repeat_current_playback(&self, state: SwitchState) -> Result<()> {
+        self.send_command(Command::RepeatCurrentPlayback(state))
+    }
+
+    /// Sets the DAC state (on or off).
+    pub fn set_dac_state(&self, state: SwitchState) -> Result<()> {
+        self.send_command(Command::SetDacState(state))
+    }
+
+    /// Sends a raw command byte with two parameter bytes.
+    pub fn send_raw(&self, command: u8, param1: u8, param2: u8) -> Result<()> {
+        self.send_command(Command::Raw(command, param1, param2))
     }
 }

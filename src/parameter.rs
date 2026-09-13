@@ -43,3 +43,25 @@ pub enum PlaybackSource {
     Sleep = 0x04,
     Flash = 0x05,
 }
+
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+pub enum SwitchState {
+    On = 0x1,
+    Off = 0x0,
+}
+
+impl SwitchState {
+    pub fn invert(self) -> Self {
+        match self {
+            Self::On => Self::Off,
+            Self::Off => Self::On,
+        }
+    }
+}
+
+impl From<SwitchState> for u8 {
+    fn from(value: SwitchState) -> Self {
+        value as u8
+    }
+}
