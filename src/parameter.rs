@@ -36,9 +36,10 @@ pub enum EqualizerPreset {
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
-pub enum PlaybackMode {
-    Repeat = 0x00,
-    FolderRepeat = 0x01,
-    SingleRepeat = 0x02,
-    Random = 0x03,
+pub enum PlaybackSource {
+    Usb = 0x01,
+    Tf = 0x02,
+    Aux = 0x03,
+    Sleep = 0x04,
+    Flash = 0x05,
 }

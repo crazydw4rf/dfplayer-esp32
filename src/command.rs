@@ -1,4 +1,5 @@
-use crate::parameter::{EqualizerPreset, Parameter, PlaybackMode};
+use crate::PlaybackSource;
+use crate::parameter::{EqualizerPreset, Parameter};
 use crate::{Result, error::Error};
 
 /// A collection of DFPlayer Mini commands.
@@ -10,7 +11,7 @@ pub enum Command {
     /// Plays the previous track.
     Previous,
 
-    /// Plays a specific track number (1–2999).
+    /// Plays a specific track number (1–3000) in the root folder.
     PlayTrack(u16),
 
     /// Increases the volume by one step.
@@ -25,35 +26,38 @@ pub enum Command {
     /// Sets the equalizer preset (Normal, Pop, Rock, Jazz, Classic, Bass).
     SetEqualizerPreset(EqualizerPreset),
 
-    /// Sets the playback mode (Repeat, Folder repeat, Single repeat, Random).
-    SetPlaybackMode(PlaybackMode),
+    /// Repeats a single track (1–3000).
+    RepeatTrack(u16),
 
     /// Sets the playback source (USB, TF Card, AUX, Sleep, Flash).
-    SetPlaybackSource,
+    SetPlaybackSource(PlaybackSource),
 
     /// Enters low-power standby mode.
     EnterStandby,
 
-    /// Puts the module in normal working mode (exits standby).
+    /// Exits standby mode and resumes normal operation.
     ExitStandby,
 
     /// Resets the DFPlayer Mini module.
     ResetModule,
 
     /// Resumes playback.
-    PlaybackResume,
+    Resume,
 
     /// Pauses playback.
-    PlaybackPause,
+    Pause,
 
-    /// Plays a specific track from a specified folder (Folder 1–99, File 1–255).
-    SetPlaybackFolder,
+    /// Plays a track from a specific folder (Folder 1–99, File 1–255).
+    PlayFromFolder(u8, u8),
 
-    /// Sets the volume gain (gain 0–31).
-    SetVolumeGain,
+    /// Sets the volume gain (0–31).
+    SetVolumeGain(bool, u8),
 
-    /// Enables (1) or stops (0) repeat playback.
-    RepeatPlay,
+    /// Enables or disables repeat playback for all tracks.
+    RepeatAll(bool),
+
+    /// Plays a specific track (1–3000) in the MP3 folder.
+    PlayFromMp3Folder(u16),
 }
 
 impl Command {
@@ -67,54 +71,50 @@ impl Command {
             Self::VolumeDown => 0x05,
             Self::SetVolume(_) => 0x06,
             Self::SetEqualizerPreset(_) => 0x07,
-            Self::SetPlaybackMode(_) => 0x08,
-            Self::SetPlaybackSource => 0x09,
+            Self::RepeatTrack(_) => 0x08,
+            Self::SetPlaybackSource(_) => 0x09,
             Self::EnterStandby => 0x0A,
             Self::ExitStandby => 0x0B,
             Self::ResetModule => 0x0C,
-            Self::PlaybackResume => 0x0D,
-            Self::PlaybackPause => 0x0E,
-            Self::SetPlaybackFolder => 0x0F,
-            Self::SetVolumeGain => 0x10,
-            Self::RepeatPlay => 0x11,
+            Self::Resume => 0x0D,
+            Self::Pause => 0x0E,
+            Self::PlayFromFolder(_, _) => 0x0F,
+            Self::SetVolumeGain(_, _) => 0x10,
+            Self::RepeatAll(_) => 0x11,
+            Self::PlayFromMp3Folder(_) => 0x12,
         }
     }
 
     pub fn parameter(&self) -> Result<Parameter> {
         match *self {
-            Self::Next => Ok(Parameter::default()),
-            Self::Previous => Ok(Parameter::default()),
-            Self::PlayTrack(track_num) => {
-                if !(1..=2999).contains(&track_num) {
-                    return Err(Error::InvalidParameter(
-                        "track number must be between 1 and 2999".into(),
-                    ));
-                }
-
-                Ok(Parameter::from(track_num))
-            }
-            Self::VolumeUp => Ok(Parameter::default()),
-            Self::VolumeDown => Ok(Parameter::default()),
             Self::SetVolume(level) => {
-                if !(0..=30).contains(&level) {
+                if level > 30 {
                     return Err(Error::InvalidParameter(
-                        "volume must be in the range 0 to 30".into(),
+                        "volume must be in the range 0 to 30",
                     ));
                 }
 
                 Ok(Parameter::new(0, level))
-            }
-            Self::SetEqualizerPreset(preset) => Ok(Parameter::new(0, preset as u8)),
-            Self::SetPlaybackMode(mode) => Ok(Parameter::new(0, mode as u8)),
-            Self::SetPlaybackSource => Ok(Parameter::default()),
-            Self::EnterStandby => Ok(Parameter::default()),
-            Self::ExitStandby => Ok(Parameter::default()),
-            Self::ResetModule => Ok(Parameter::default()),
-            Self::PlaybackResume => Ok(Parameter::default()),
-            Self::PlaybackPause => Ok(Parameter::default()),
-            Self::SetPlaybackFolder => Ok(Parameter::default()),
-            Self::SetVolumeGain => Ok(Parameter::default()),
-            Self::RepeatPlay => Ok(Parameter::default()),
+            } // 0x06
+            Self::SetVolumeGain(enable, level) => {
+                if level > 30 {
+                    return Err(Error::InvalidParameter(
+                        "volume gain must be in the range 0 to 30",
+                    ));
+                }
+
+                Ok(Parameter::new(enable.into(), level))
+            } // 0x10
+            Self::PlayFromFolder(folder, track) => Ok(Parameter::new(folder, track)),    // 0x0F
+            Self::PlayTrack(track_num) => Ok(Parameter::from(track_num)),                // 0x03
+            Self::RepeatTrack(track_num) => Ok(Parameter::from(track_num)),              // 0x08
+            Self::PlayFromMp3Folder(track_num) => Ok(Parameter::from(track_num)),        // 0x12
+            Self::RepeatAll(enable) => Ok(Parameter::new(0, enable.into())),             // 0x11
+            Self::SetEqualizerPreset(preset) => Ok(Parameter::new(0, preset as u8)),     // 0x07
+            Self::SetPlaybackSource(source) => Ok(Parameter::new(0, source as u8)),      // 0x09
+            Self::EnterStandby => Ok(Parameter::new(0, 1)),                              // 0x0A
+            Self::ExitStandby => Ok(Parameter::new(0, 1)),                               // 0x0B
+            _ => Ok(Parameter::default()),
         }
     }
 }
