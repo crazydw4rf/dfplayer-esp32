@@ -1,48 +1,114 @@
-use esp_idf_hal::uart::UartDriver;
+use std::time::Duration;
+use crate::error::DeviceError;
+
+use esp_idf_hal::{
+    delay::{FreeRtos, TickType},
+    uart::UartDriver,
+};
+
 
 pub mod command;
 pub mod error;
-pub mod parameter;
+pub mod payload;
+pub mod query;
 
 pub use command::*;
-pub use parameter::*;
+pub use payload::*;
+pub use query::*;
 
 const START_BYTE: u8 = 0x7E;
 const END_BYTE: u8 = 0xEF;
 const VERSION_BYTE: u8 = 0xFF;
 const COMMAND_LENGTH: u8 = 0x06;
-const COMMAND_FEEDBACK: u8 = 0x00;
+const RESPONSE_ERROR: u8 = 0x40;
 
 type Result<T, E = error::Error> = std::result::Result<T, E>;
 
+#[derive(PartialEq, Debug)]
+pub(crate) enum CommandType {
+    Command,
+    Query,
+}
+
+pub(crate) trait CommandPayload {
+    const TYPE: CommandType;
+
+    fn command_byte(self) -> u8;
+    fn parameter(self) -> Result<FramePayload, error::Error>;
+}
+
+/// Driver for the DFPlayer Mini MP3 module.
+///
+/// ## Example
+///
+/// ```rust,no_run
+/// use dfplayer_esp32::DfPlayer;
+/// use esp_idf_hal::peripherals::Peripherals;
+/// use esp_idf_hal::uart::{config::Config as UartConfig, UartDriver};
+/// use esp_idf_hal::gpio::AnyIOPin;
+///
+/// let peripherals = Peripherals::take().unwrap();
+/// let config = UartConfig::new().baudrate(9600.into());
+///
+/// let uart = UartDriver::new(
+///     peripherals.uart1,
+///     peripherals.pins.gpio17, // TX pin connected to DFPlayer RX
+///     peripherals.pins.gpio16, // RX pin connected to DFPlayer TX
+///     Option::<AnyIOPin>::None,
+///     Option::<AnyIOPin>::None,
+///     &config,
+/// ).unwrap();
+///
+/// let player = DfPlayer::new(&uart);
+/// player.set_volume(15).unwrap();
+/// player.play_track(1).unwrap();
+/// ```
 pub struct DfPlayer<'d> {
-    uart: UartDriver<'d>,
+    uart: &'d UartDriver<'d>,
+    timeout: TickType,
 }
 
 impl<'d> DfPlayer<'d> {
-    pub fn new(uart: UartDriver<'d>) -> Self {
-        Self { uart }
+    /// Creates a new DFPlayer Mini driver instance using the provided UART driver.
+    ///
+    /// The default response timeout is set to 1000 milliseconds.
+    pub fn new(uart: &'d UartDriver<'d>) -> Self {
+        Self {
+            uart,
+            timeout: TickType::new_millis(1000), // default 1000 milliseconds
+        }
     }
 
-    pub fn send_command(&self, command: Command) -> Result<()> {
+    /// Sets the response timeout duration for receiving response and query frames.
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.timeout = TickType::from(timeout);
+    }
+
+    pub(crate) fn send_command<C, T>(&self, command: C) -> Result<T>
+    where
+        C: CommandPayload + Clone + Copy,
+        T: TryFrom<FramePayload, Error = error::Error>,
+    {
         let (param1, param2) = command.parameter()?.into();
         let command_byte = command.command_byte();
+
+        let ack = (C::TYPE == CommandType::Command) as u8;
 
         let [checksum_high, checksum_low] = (VERSION_BYTE as u16
             + COMMAND_LENGTH as u16
             + command_byte as u16
-            + COMMAND_FEEDBACK as u16
+            + ack as u16
             + param1 as u16
             + param2 as u16)
             .wrapping_neg()
             .to_be_bytes();
 
-        let command_line: [u8; 10] = [
+        let frame: [u8; 10] = [
             START_BYTE,
             VERSION_BYTE,
             COMMAND_LENGTH,
             command_byte,
-            COMMAND_FEEDBACK,
+            ack,
             param1,
             param2,
             checksum_high,
@@ -50,11 +116,29 @@ impl<'d> DfPlayer<'d> {
             END_BYTE,
         ];
 
-        log::debug!("UART command sent: {:02X?}", command_line);
+        self.uart.clear_rx()?;
 
-        self.uart.write(&command_line)?;
+        log::debug!("Sending frame: {frame:02X?}");
+        self.uart.write(&frame)?;
 
-        Ok(())
+        let mut frame = [0u8; 10];
+        self.uart.read(&mut frame, self.timeout.ticks())?;
+        log::debug!("Received frame: {frame:02X?}");
+
+        let (command, lsb) = (frame[3], frame[6]);
+
+        if command == RESPONSE_ERROR {
+            let error = DeviceError::try_from(lsb).unwrap_or_default();
+            log::error!("DFPlayer returned error: {error}");
+            return Err(error::Error::DeviceError(error));
+        }
+
+        let data = FramePayload::from(frame).try_into().map_err(|e| {
+            log::error!("Failed to parse response payload: {e}");
+            e
+        })?;
+
+        Ok(data)
     }
 
     /// Plays the next track.
@@ -118,8 +202,17 @@ impl<'d> DfPlayer<'d> {
     }
 
     /// Resets the DFPlayer Mini module.
+    ///
+    /// Note that this function takes approximately 1.5 seconds to allow the module
+    /// to complete its hardware reboot and mount storage devices.
     pub fn reset_module(&self) -> Result<()> {
-        self.send_command(Command::ResetModule)
+        log::debug!("Resetting the DFPlayer Mini module...");
+        self.send_command::<_, ()>(Command::ResetModule)?;
+
+        FreeRtos::delay_ms(1500);
+        self.uart.clear_rx()?;
+
+        Ok(())
     }
 
     /// Resumes playback.
@@ -190,5 +283,50 @@ impl<'d> DfPlayer<'d> {
     /// Sends a raw command byte with two parameter bytes.
     pub fn send_raw(&self, command: u8, param1: u8, param2: u8) -> Result<()> {
         self.send_command(Command::Raw(command, param1, param2))
+    }
+
+    /// Queries the current active playback storage source (USB, TF Card, AUX, Sleep, Flash).
+    pub fn current_playback_source(&self) -> Result<PlaybackSource> {
+        self.send_command(Query::PlaybackSource)
+    }
+
+    /// Queries the current playback status (Playing, Paused, Stopped, or Sleep).
+    pub fn current_playback_status(&self) -> Result<PlaybackStatus> {
+        self.send_command(Query::PlaybackStatus)
+    }
+
+    /// Queries the current output volume level (0–30).
+    pub fn volume_level(&self) -> Result<u8> {
+        self.send_command(Query::VolumeLevel)
+    }
+
+    /// Queries the current equalizer preset (Normal, Pop, Rock, Jazz, Classic, Bass).
+    pub fn current_equalizer_preset(&self) -> Result<EqualizerPreset> {
+        self.send_command(Query::EqualizerPreset)
+    }
+
+    /// Queries the total number of audio tracks on the USB flash drive.
+    pub fn tracks_count_usb(&self) -> Result<u16> {
+        self.send_command(Query::TracksCountUsb)
+    }
+
+    /// Queries the total number of audio tracks on the TF (MicroSD) card.
+    pub fn tracks_count_tf(&self) -> Result<u16> {
+        self.send_command(Query::TracksCountTf)
+    }
+
+    /// Queries the currently playing track number on the USB flash drive.
+    pub fn current_track_usb(&self) -> Result<u16> {
+        self.send_command(Query::CurrentTrackUsb)
+    }
+
+    /// Queries the currently playing track number on the TF (MicroSD) card.
+    pub fn current_track_tf(&self) -> Result<u16> {
+        self.send_command(Query::CurrentTrackTf)
+    }
+
+    /// Queries the total number of audio tracks in a specific folder (Folder 1–99).
+    pub fn tracks_count_in_folder(&self, folder: u8) -> Result<u16> {
+        self.send_command(Query::TrackCountsFolder(folder))
     }
 }

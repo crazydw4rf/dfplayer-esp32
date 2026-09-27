@@ -11,7 +11,6 @@ References and datasheets:
 
 ## TODO
 
-- [ ] implement query commands
 - [ ] support `esp-hal` or `no_std`
 - [ ] write proper documentation
 - [ ] add code examples

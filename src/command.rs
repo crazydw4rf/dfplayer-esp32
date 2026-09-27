@@ -1,9 +1,8 @@
-use crate::parameter::{EqualizerPreset, Parameter};
-use crate::{PlaybackSource, SwitchState};
-use crate::{Result, error::Error};
+use crate::payload::{EqualizerPreset, FramePayload, PlaybackSource, SwitchState};
+use crate::{CommandPayload, CommandType, Result, error::Error};
 
 /// A collection of DFPlayer Mini commands.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Command {
     /// Plays the next track.
     Next,
@@ -83,13 +82,16 @@ pub enum Command {
     /// Sets the DAC state (on or off).
     SetDacState(SwitchState),
 
+    /// Sends a raw command with a custom command byte, MSB parameter, and LSB parameter.
     Raw(u8, u8, u8),
 }
 
-impl Command {
+impl CommandPayload for Command {
+    const TYPE: CommandType = CommandType::Command;
+
     /// Gets the command byte code.
-    pub fn command_byte(&self) -> u8 {
-        match *self {
+    fn command_byte(self) -> u8 {
+        match self {
             Self::Next => 0x01,
             Self::Previous => 0x02,
             Self::PlayTrack(_) => 0x03,
@@ -120,8 +122,8 @@ impl Command {
         }
     }
 
-    pub fn parameter(&self) -> Result<Parameter> {
-        match *self {
+    fn parameter(self) -> Result<FramePayload> {
+        match self {
             Self::SetVolume(level) => {
                 if level > 30 {
                     return Err(Error::InvalidParameter(
@@ -129,7 +131,7 @@ impl Command {
                     ));
                 }
 
-                Ok(Parameter::new(0, level))
+                Ok(FramePayload::new(0, level))
             } // 0x06
             Self::SetVolumeGain(state, level) => {
                 if level > 31 {
@@ -138,7 +140,7 @@ impl Command {
                     ));
                 }
 
-                Ok(Parameter::new(state.into(), level))
+                Ok(FramePayload::new(state.into(), level))
             } // 0x10
             Self::PlayFromFolderLarge(folder, track_num) => {
                 if !(1..=15).contains(&folder) || !(1..=3000).contains(&track_num) {
@@ -149,7 +151,7 @@ impl Command {
 
                 let params: u16 = ((folder as u16) << 12) | (track_num & 0x0FFF);
 
-                Ok(Parameter::from(params))
+                Ok(FramePayload::from(params))
             } // 0x14
             Self::RepeatPlaybackFolder(folder) => {
                 if !(1..=99).contains(&folder) {
@@ -158,22 +160,42 @@ impl Command {
                     ));
                 }
 
-                Ok(Parameter::new(0, folder))
+                Ok(FramePayload::new(0, folder))
             } // 0x17
-            Self::PlayFromFolder(folder, track_num) => Ok(Parameter::new(folder, track_num)), // 0x0F
-            Self::PlayTrack(track_num) => Ok(Parameter::from(track_num)), // 0x03
-            Self::RepeatTrack(track_num) => Ok(Parameter::from(track_num)), // 0x08
-            Self::PlayFromMp3Folder(track_num) => Ok(Parameter::from(track_num)), // 0x12
-            Self::PlayFromAdvertFolder(track_num) => Ok(Parameter::from(track_num)), // 0x13
-            Self::RepeatAll(state) => Ok(Parameter::new(0, state.into())), // 0x11
-            Self::SetEqualizerPreset(preset) => Ok(Parameter::new(0, preset as u8)), // 0x07
-            Self::SetPlaybackSource(source) => Ok(Parameter::new(0, source as u8)), // 0x09
-            Self::EnterStandby => Ok(Parameter::new(0, 1)),               // 0x0A
-            Self::ExitStandby => Ok(Parameter::new(0, 1)),                // 0x0B
-            Self::RepeatCurrentPlayback(state) => Ok(Parameter::new(0, state.invert().into())), // 0x19
-            Self::SetDacState(state) => Ok(Parameter::new(0, state.invert().into())), // 0x1A
-            Self::Raw(_, param1, param2) => Ok(Parameter::new(param1, param2)),
-            _ => Ok(Parameter::default()),
+            Self::PlayFromFolder(folder, track_num) => {
+                if !(1..=99).contains(&folder) || !(1..=255).contains(&track_num) {
+                    return Err(Error::InvalidParameter(
+                        "max folder is 99 and max track number is 255",
+                    ));
+                }
+
+                Ok(FramePayload::new(folder, track_num))
+            } // 0x0F
+            Self::PlayTrack(track_num) => {
+                if track_num == 0 {
+                    return Err(Error::InvalidParameter("track number cannot be 0"));
+                }
+
+                if track_num > 3000 {
+                    log::warn!(
+                        "Track number {track_num} exceeds 3000, which may slow down the module"
+                    );
+                }
+
+                Ok(FramePayload::from(track_num))
+            } // 0x03
+            Self::RepeatTrack(track_num) => Ok(FramePayload::from(track_num)), // 0x08
+            Self::PlayFromMp3Folder(track_num) => Ok(FramePayload::from(track_num)), // 0x12
+            Self::PlayFromAdvertFolder(track_num) => Ok(FramePayload::from(track_num)), // 0x13
+            Self::RepeatAll(state) => Ok(FramePayload::new(0, state.into())),  // 0x11
+            Self::SetEqualizerPreset(preset) => Ok(FramePayload::new(0, preset as u8)), // 0x07
+            Self::SetPlaybackSource(source) => Ok(FramePayload::new(0, source as u8)), // 0x09
+            Self::EnterStandby => Ok(FramePayload::new(0, 1)),                 // 0x0A
+            Self::ExitStandby => Ok(FramePayload::new(0, 1)),                  // 0x0B
+            Self::RepeatCurrentPlayback(state) => Ok(FramePayload::new(0, state.invert().into())), // 0x19
+            Self::SetDacState(state) => Ok(FramePayload::new(0, state.invert().into())), // 0x1A
+            Self::Raw(_, param1, param2) => Ok(FramePayload::new(param1, param2)),
+            _ => Ok(FramePayload::default()),
         }
     }
 }
