@@ -1,11 +1,9 @@
 use std::time::Duration;
-use crate::error::DeviceError;
 
 use esp_idf_hal::{
     delay::{FreeRtos, TickType},
     uart::UartDriver,
 };
-
 
 pub mod command;
 pub mod error;
@@ -16,26 +14,7 @@ pub use command::*;
 pub use payload::*;
 pub use query::*;
 
-const START_BYTE: u8 = 0x7E;
-const END_BYTE: u8 = 0xEF;
-const VERSION_BYTE: u8 = 0xFF;
-const COMMAND_LENGTH: u8 = 0x06;
-const RESPONSE_ERROR: u8 = 0x40;
-
 type Result<T, E = error::Error> = std::result::Result<T, E>;
-
-#[derive(PartialEq, Debug)]
-pub(crate) enum CommandType {
-    Command,
-    Query,
-}
-
-pub(crate) trait CommandPayload {
-    const TYPE: CommandType;
-
-    fn command_byte(self) -> u8;
-    fn parameter(self) -> Result<FramePayload, error::Error>;
-}
 
 /// Driver for the DFPlayer Mini MP3 module.
 ///
@@ -84,61 +63,33 @@ impl<'d> DfPlayer<'d> {
         self.timeout = TickType::from(timeout);
     }
 
-    pub(crate) fn send_command<C, T>(&self, command: C) -> Result<T>
+    pub(crate) fn send_command<C>(&self, command: C) -> Result<()>
     where
-        C: CommandPayload + Clone + Copy,
-        T: TryFrom<FramePayload, Error = error::Error>,
+        C: TryInto<FramePayload, Error = error::Error> + Clone + Copy,
     {
-        let (param1, param2) = command.parameter()?.into();
-        let command_byte = command.command_byte();
-
-        let ack = (C::TYPE == CommandType::Command) as u8;
-
-        let [checksum_high, checksum_low] = (VERSION_BYTE as u16
-            + COMMAND_LENGTH as u16
-            + command_byte as u16
-            + ack as u16
-            + param1 as u16
-            + param2 as u16)
-            .wrapping_neg()
-            .to_be_bytes();
-
-        let frame: [u8; 10] = [
-            START_BYTE,
-            VERSION_BYTE,
-            COMMAND_LENGTH,
-            command_byte,
-            ack,
-            param1,
-            param2,
-            checksum_high,
-            checksum_low,
-            END_BYTE,
-        ];
+        let frame_payload: FramePayload = command.try_into()?;
+        let frame = frame_payload.into_send_frame();
 
         self.uart.clear_rx()?;
 
         log::debug!("Sending frame: {frame:02X?}");
         self.uart.write(&frame)?;
 
-        let mut frame = [0u8; 10];
-        self.uart.read(&mut frame, self.timeout.ticks())?;
-        log::debug!("Received frame: {frame:02X?}");
+        Ok(())
+    }
 
-        let (command, lsb) = (frame[3], frame[6]);
+    pub(crate) fn read_response<T>(&self) -> Result<T>
+    where
+        T: TryFrom<FramePayload, Error = error::Error>,
+    {
+        let mut buf = [0_u8; 10];
+        self.uart.read(&mut buf, self.timeout.ticks())?;
+        log::debug!("Received frame: {buf:02X?}");
 
-        if command == RESPONSE_ERROR {
-            let error = DeviceError::try_from(lsb).unwrap_or_default();
-            log::error!("DFPlayer returned error: {error}");
-            return Err(error::Error::DeviceError(error));
-        }
+        let frame = FramePayload::from(buf);
+        frame.check_error()?;
 
-        let data = FramePayload::from(frame).try_into().map_err(|e| {
-            log::error!("Failed to parse response payload: {e}");
-            e
-        })?;
-
-        Ok(data)
+        frame.try_into()
     }
 
     /// Plays the next track.
@@ -205,9 +156,9 @@ impl<'d> DfPlayer<'d> {
     ///
     /// Note that this function takes approximately 1.5 seconds to allow the module
     /// to complete its hardware reboot and mount storage devices.
-    pub fn reset_module(&self) -> Result<()> {
+    pub fn reset(&self) -> Result<()> {
         log::debug!("Resetting the DFPlayer Mini module...");
-        self.send_command::<_, ()>(Command::ResetModule)?;
+        self.send_command(Command::Reset)?;
 
         FreeRtos::delay_ms(1500);
         self.uart.clear_rx()?;
@@ -230,9 +181,9 @@ impl<'d> DfPlayer<'d> {
         self.send_command(Command::PlayFromFolder(folder, track))
     }
 
-    /// Plays a track from a specific folder (Folder 1–15, File 1–3000).
-    pub fn play_from_folder_large(&self, folder: u8, track: u16) -> Result<()> {
-        self.send_command(Command::PlayFromFolderLarge(folder, track))
+    /// Plays a track from a large folder (Folder 1–15, File 1–3000).
+    pub fn play_large_folder(&self, folder: u8, track: u16) -> Result<()> {
+        self.send_command(Command::PlayLargeFolder(folder, track))
     }
 
     /// Sets the volume gain (0–31).
@@ -256,77 +207,87 @@ impl<'d> DfPlayer<'d> {
     }
 
     /// Stops all playback.
-    pub fn stop_all_playback(&self) -> Result<()> {
-        self.send_command(Command::StopAllPlayback)
+    pub fn stop(&self) -> Result<()> {
+        self.send_command(Command::Stop)
     }
 
     /// Plays and repeats all tracks in a specific folder (Folder 1–99).
-    pub fn repeat_playback_folder(&self, folder: u8) -> Result<()> {
-        self.send_command(Command::RepeatPlaybackFolder(folder))
+    pub fn repeat_folder(&self, folder: u8) -> Result<()> {
+        self.send_command(Command::RepeatFolder(folder))
     }
 
     /// Starts random playback for all tracks.
-    pub fn start_random_playback(&self) -> Result<()> {
-        self.send_command(Command::StartRandomPlayback)
+    pub fn play_random(&self) -> Result<()> {
+        self.send_command(Command::PlayRandom)
     }
 
     /// Enables or disables repeating the currently playing track.
-    pub fn repeat_current_playback(&self, state: SwitchState) -> Result<()> {
-        self.send_command(Command::RepeatCurrentPlayback(state))
+    pub fn repeat_current_track(&self, state: SwitchState) -> Result<()> {
+        self.send_command(Command::RepeatCurrentTrack(state))
     }
 
     /// Sets the DAC state (on or off).
-    pub fn set_dac_state(&self, state: SwitchState) -> Result<()> {
-        self.send_command(Command::SetDacState(state))
+    pub fn set_dac(&self, state: SwitchState) -> Result<()> {
+        self.send_command(Command::SetDac(state))
     }
 
     /// Sends a raw command byte with two parameter bytes.
-    pub fn send_raw(&self, command: u8, param1: u8, param2: u8) -> Result<()> {
-        self.send_command(Command::Raw(command, param1, param2))
+    pub fn send_raw(&self, command: u8, param_msb: ParamMsb, param_lsb: ParamLsb) -> Result<u16> {
+        self.send_command(Command::Raw(command, param_msb, param_lsb))?;
+        self.read_response()
     }
 
     /// Queries the current active playback storage source (USB, TF Card, AUX, Sleep, Flash).
-    pub fn current_playback_source(&self) -> Result<PlaybackSource> {
-        self.send_command(Query::PlaybackSource)
+    pub fn playback_source(&self) -> Result<PlaybackSource> {
+        self.send_command(Query::PlaybackSource)?;
+        self.read_response()
     }
 
     /// Queries the current playback status (Playing, Paused, Stopped, or Sleep).
-    pub fn current_playback_status(&self) -> Result<PlaybackStatus> {
-        self.send_command(Query::PlaybackStatus)
+    pub fn playback_status(&self) -> Result<PlaybackStatus> {
+        self.send_command(Query::PlaybackStatus)?;
+        self.read_response()
     }
 
     /// Queries the current output volume level (0–30).
-    pub fn volume_level(&self) -> Result<u8> {
-        self.send_command(Query::VolumeLevel)
+    pub fn volume(&self) -> Result<u8> {
+        self.send_command(Query::Volume)?;
+        self.read_response()
     }
 
-    /// Queries the current equalizer preset (Normal, Pop, Rock, Jazz, Classic, Bass).
-    pub fn current_equalizer_preset(&self) -> Result<EqualizerPreset> {
-        self.send_command(Query::EqualizerPreset)
+    /// Queries the current equalizer preset (Normal, Pop, Rock, Jazz, Classical, Bass).
+    pub fn equalizer_preset(&self) -> Result<EqualizerPreset> {
+        self.send_command(Query::EqualizerPreset)?;
+        self.read_response()
     }
 
     /// Queries the total number of audio tracks on the USB flash drive.
-    pub fn tracks_count_usb(&self) -> Result<u16> {
-        self.send_command(Query::TracksCountUsb)
+    pub fn track_count_usb(&self) -> Result<u16> {
+        self.send_command(Query::TrackCountUsb)?;
+        self.read_response()
     }
 
     /// Queries the total number of audio tracks on the TF (MicroSD) card.
-    pub fn tracks_count_tf(&self) -> Result<u16> {
-        self.send_command(Query::TracksCountTf)
+    pub fn track_count_tf(&self) -> Result<u16> {
+        self.send_command(Query::TrackCountTf)?;
+        self.read_response()
     }
 
     /// Queries the currently playing track number on the USB flash drive.
     pub fn current_track_usb(&self) -> Result<u16> {
-        self.send_command(Query::CurrentTrackUsb)
+        self.send_command(Query::CurrentTrackUsb)?;
+        self.read_response()
     }
 
     /// Queries the currently playing track number on the TF (MicroSD) card.
     pub fn current_track_tf(&self) -> Result<u16> {
-        self.send_command(Query::CurrentTrackTf)
+        self.send_command(Query::CurrentTrackTf)?;
+        self.read_response()
     }
 
     /// Queries the total number of audio tracks in a specific folder (Folder 1–99).
-    pub fn tracks_count_in_folder(&self, folder: u8) -> Result<u16> {
-        self.send_command(Query::TrackCountsFolder(folder))
+    pub fn track_count_folder(&self, folder: u8) -> Result<u16> {
+        self.send_command(Query::TrackCountFolder(folder))?;
+        self.read_response()
     }
 }

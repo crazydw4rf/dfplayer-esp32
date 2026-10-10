@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "dfplayer-esp32"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "derive_more",
  "esp-idf-hal",

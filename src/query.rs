@@ -1,4 +1,4 @@
-use crate::{CommandPayload, CommandType, FramePayload, Result};
+use crate::{FramePayload, Result, error};
 
 /// A collection of DFPlayer Mini query commands.
 ///
@@ -12,16 +12,16 @@ pub enum Query {
     PlaybackStatus,
 
     /// Queries the current output volume level (0–30).
-    VolumeLevel,
+    Volume,
 
-    /// Queries the current equalizer preset (Normal, Pop, Rock, Jazz, Classic, Bass).
+    /// Queries the current equalizer preset (Normal, Pop, Rock, Jazz, Classical, Bass).
     EqualizerPreset,
 
     /// Queries the total number of audio tracks available on the USB flash drive.
-    TracksCountUsb,
+    TrackCountUsb,
 
     /// Queries the total number of audio tracks available on the TF (MicroSD) card.
-    TracksCountTf,
+    TrackCountTf,
 
     /// Queries the currently playing track number on the USB flash drive.
     CurrentTrackUsb,
@@ -30,30 +30,23 @@ pub enum Query {
     CurrentTrackTf,
 
     /// Queries the total number of audio tracks in a specific folder (Folder 1–99).
-    TrackCountsFolder(u8),
+    TrackCountFolder(u8),
 }
 
-impl CommandPayload for Query {
-    const TYPE: CommandType = CommandType::Query;
+impl TryFrom<Query> for FramePayload {
+    type Error = error::Error;
 
-    fn command_byte(self) -> u8 {
-        match self {
-            Self::PlaybackSource => 0x3F,
-            Self::PlaybackStatus => 0x42,
-            Self::VolumeLevel => 0x43,
-            Self::EqualizerPreset => 0x44,
-            Self::TracksCountUsb => 0x47,
-            Self::TracksCountTf => 0x48,
-            Self::CurrentTrackUsb => 0x4B,
-            Self::CurrentTrackTf => 0x4C,
-            Self::TrackCountsFolder(_) => 0x4F,
-        }
-    }
-
-    fn parameter(self) -> Result<FramePayload> {
-        match self {
-            Self::TrackCountsFolder(folder) => Ok(FramePayload::new(0, folder)),
-            _ => Ok(FramePayload::default()),
+    fn try_from(value: Query) -> Result<Self, Self::Error> {
+        match value {
+            Query::PlaybackSource => Ok(FramePayload::from_cmd(0x3F)),
+            Query::PlaybackStatus => Ok(FramePayload::from_cmd(0x42)),
+            Query::Volume => Ok(FramePayload::from_cmd(0x43)),
+            Query::EqualizerPreset => Ok(FramePayload::from_cmd(0x44)),
+            Query::TrackCountUsb => Ok(FramePayload::from_cmd(0x47)),
+            Query::TrackCountTf => Ok(FramePayload::from_cmd(0x48)),
+            Query::CurrentTrackUsb => Ok(FramePayload::from_cmd(0x4B)),
+            Query::CurrentTrackTf => Ok(FramePayload::from_cmd(0x4C)),
+            Query::TrackCountFolder(folder) => Ok(FramePayload::new(0x4F, folder as u16)),
         }
     }
 }

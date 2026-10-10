@@ -1,5 +1,6 @@
+use crate::error::Error::InvalidParameter;
 use crate::payload::{EqualizerPreset, FramePayload, PlaybackSource, SwitchState};
-use crate::{CommandPayload, CommandType, Result, error::Error};
+use crate::{ParamLsb, ParamMsb, Result};
 
 /// A collection of DFPlayer Mini commands.
 #[derive(Clone, Copy, Debug)]
@@ -22,7 +23,7 @@ pub enum Command {
     /// Sets the volume level (0–30).
     SetVolume(u8),
 
-    /// Sets the equalizer preset (Normal, Pop, Rock, Jazz, Classic, Bass).
+    /// Sets the equalizer preset (Normal, Pop, Rock, Jazz, Classical, Bass).
     SetEqualizerPreset(EqualizerPreset),
 
     /// Repeats a single track (1–3000).
@@ -38,7 +39,7 @@ pub enum Command {
     ExitStandby,
 
     /// Resets the DFPlayer Mini module.
-    ResetModule,
+    Reset,
 
     /// Resumes playback.
     Resume,
@@ -62,140 +63,130 @@ pub enum Command {
     PlayFromAdvertFolder(u16),
 
     /// Plays a specific track from a large folder (up to 15 folders, up to 3000 tracks).
-    PlayFromFolderLarge(u8, u16),
+    PlayLargeFolder(u8, u16),
 
     /// Stops the currently playing advertisement and resumes previous playback.
     SkipAdvertisement,
 
     /// Stops all playback.
-    StopAllPlayback,
+    Stop,
 
     /// Plays and repeats all tracks in a specific folder (Folder 1–99).
-    RepeatPlaybackFolder(u8),
+    RepeatFolder(u8),
 
     /// Starts random playback for all tracks.
-    StartRandomPlayback,
+    PlayRandom,
 
     /// Enables or disables repeating the currently playing track.
-    RepeatCurrentPlayback(SwitchState),
+    RepeatCurrentTrack(SwitchState),
 
     /// Sets the DAC state (on or off).
-    SetDacState(SwitchState),
+    SetDac(SwitchState),
 
     /// Sends a raw command with a custom command byte, MSB parameter, and LSB parameter.
-    Raw(u8, u8, u8),
+    Raw(u8, ParamMsb, ParamLsb),
 }
 
-impl CommandPayload for Command {
-    const TYPE: CommandType = CommandType::Command;
-
-    /// Gets the command byte code.
-    fn command_byte(self) -> u8 {
-        match self {
-            Self::Next => 0x01,
-            Self::Previous => 0x02,
-            Self::PlayTrack(_) => 0x03,
-            Self::VolumeUp => 0x04,
-            Self::VolumeDown => 0x05,
-            Self::SetVolume(_) => 0x06,
-            Self::SetEqualizerPreset(_) => 0x07,
-            Self::RepeatTrack(_) => 0x08,
-            Self::SetPlaybackSource(_) => 0x09,
-            Self::EnterStandby => 0x0A,
-            Self::ExitStandby => 0x0B,
-            Self::ResetModule => 0x0C,
-            Self::Resume => 0x0D,
-            Self::Pause => 0x0E,
-            Self::PlayFromFolder(_, _) => 0x0F,
-            Self::SetVolumeGain(_, _) => 0x10,
-            Self::RepeatAll(_) => 0x11,
-            Self::PlayFromMp3Folder(_) => 0x12,
-            Self::PlayFromAdvertFolder(_) => 0x13,
-            Self::PlayFromFolderLarge(_, _) => 0x14,
-            Self::SkipAdvertisement => 0x15,
-            Self::StopAllPlayback => 0x16,
-            Self::RepeatPlaybackFolder(_) => 0x17,
-            Self::StartRandomPlayback => 0x18,
-            Self::RepeatCurrentPlayback(_) => 0x19,
-            Self::SetDacState(_) => 0x1A,
-            Self::Raw(cmd, _, _) => cmd,
+impl Command {
+    fn play_track(track_num: u16) -> Result<FramePayload> {
+        if track_num == 0 {
+            return Err(InvalidParameter(
+                "track number cannot be 0 (must be 1–3000)",
+            ));
         }
+
+        Ok(FramePayload::new(0x03, track_num))
     }
 
-    fn parameter(self) -> Result<FramePayload> {
-        match self {
-            Self::SetVolume(level) => {
-                if level > 30 {
-                    return Err(Error::InvalidParameter(
-                        "volume must be in the range 0 to 30",
-                    ));
-                }
+    fn set_volume(volume: u8) -> Result<FramePayload> {
+        if volume > 30 {
+            return Err(InvalidParameter(
+                "volume level cannot exceed 30 (range: 0–30)",
+            ));
+        }
 
-                Ok(FramePayload::new(0, level))
-            } // 0x06
-            Self::SetVolumeGain(state, level) => {
-                if level > 31 {
-                    return Err(Error::InvalidParameter(
-                        "volume gain must be in the range 0 to 31",
-                    ));
-                }
+        Ok(FramePayload::new(0x06, volume.into()))
+    }
 
-                Ok(FramePayload::new(state.into(), level))
-            } // 0x10
-            Self::PlayFromFolderLarge(folder, track_num) => {
-                if !(1..=15).contains(&folder) || !(1..=3000).contains(&track_num) {
-                    return Err(Error::InvalidParameter(
-                        "folder must be 1–15 and track number must be 1–3000",
-                    ));
-                }
+    fn play_from_folder(folder: u8, track: u8) -> Result<FramePayload> {
+        if !(1..=99).contains(&folder) || track == 0 {
+            return Err(InvalidParameter(
+                "folder must be between 1 and 99, and track number cannot be 0",
+            ));
+        }
 
-                let params: u16 = ((folder as u16) << 12) | (track_num & 0x0FFF);
+        Ok(FramePayload::new(0x0F, u16::from_be_bytes([folder, track])))
+    }
 
-                Ok(FramePayload::from(params))
-            } // 0x14
-            Self::RepeatPlaybackFolder(folder) => {
-                if !(1..=99).contains(&folder) {
-                    return Err(Error::InvalidParameter(
-                        "folder must be in the range 1 to 99",
-                    ));
-                }
+    fn set_volume_gain(state: SwitchState, volume: u8) -> Result<FramePayload> {
+        if volume > 31 {
+            return Err(InvalidParameter("volume gain must be between 0 and 31"));
+        }
 
-                Ok(FramePayload::new(0, folder))
-            } // 0x17
-            Self::PlayFromFolder(folder, track_num) => {
-                if !(1..=99).contains(&folder) || !(1..=255).contains(&track_num) {
-                    return Err(Error::InvalidParameter(
-                        "max folder is 99 and max track number is 255",
-                    ));
-                }
+        Ok(FramePayload::new(
+            0x10,
+            u16::from_be_bytes([state as u8, volume]),
+        ))
+    }
 
-                Ok(FramePayload::new(folder, track_num))
-            } // 0x0F
-            Self::PlayTrack(track_num) => {
-                if track_num == 0 {
-                    return Err(Error::InvalidParameter("track number cannot be 0"));
-                }
+    fn play_large_folder(folder: u8, track_num: u16) -> Result<FramePayload> {
+        if !(1..=15).contains(&folder) || !(1..=3000).contains(&track_num) {
+            return Err(InvalidParameter(
+                "folder must be between 1 and 15, and track number must be between 1 and 3000",
+            ));
+        }
 
-                if track_num > 3000 {
-                    log::warn!(
-                        "Track number {track_num} exceeds 3000, which may slow down the module"
-                    );
-                }
+        let params: u16 = ((folder as u16) << 12) | (track_num & 0x0FFF);
 
-                Ok(FramePayload::from(track_num))
-            } // 0x03
-            Self::RepeatTrack(track_num) => Ok(FramePayload::from(track_num)), // 0x08
-            Self::PlayFromMp3Folder(track_num) => Ok(FramePayload::from(track_num)), // 0x12
-            Self::PlayFromAdvertFolder(track_num) => Ok(FramePayload::from(track_num)), // 0x13
-            Self::RepeatAll(state) => Ok(FramePayload::new(0, state.into())),  // 0x11
-            Self::SetEqualizerPreset(preset) => Ok(FramePayload::new(0, preset as u8)), // 0x07
-            Self::SetPlaybackSource(source) => Ok(FramePayload::new(0, source as u8)), // 0x09
-            Self::EnterStandby => Ok(FramePayload::new(0, 1)),                 // 0x0A
-            Self::ExitStandby => Ok(FramePayload::new(0, 1)),                  // 0x0B
-            Self::RepeatCurrentPlayback(state) => Ok(FramePayload::new(0, state.invert().into())), // 0x19
-            Self::SetDacState(state) => Ok(FramePayload::new(0, state.invert().into())), // 0x1A
-            Self::Raw(_, param1, param2) => Ok(FramePayload::new(param1, param2)),
-            _ => Ok(FramePayload::default()),
+        Ok(FramePayload::new(0x14, params))
+    }
+
+    fn repeat_folder(folder: u8) -> Result<FramePayload> {
+        if !(1..=99).contains(&folder) {
+            return Err(InvalidParameter("folder must be between 1 and 99"));
+        }
+
+        Ok(FramePayload::new(0x17, folder as u16))
+    }
+}
+
+impl TryFrom<Command> for FramePayload {
+    type Error = crate::error::Error;
+
+    fn try_from(cmd: Command) -> Result<Self, Self::Error> {
+        match cmd {
+            Command::Next => Ok(FramePayload::from_cmd(0x01)),
+            Command::Previous => Ok(FramePayload::from_cmd(0x02)),
+            Command::PlayTrack(track_num) => Command::play_track(track_num),
+            Command::VolumeUp => Ok(FramePayload::from_cmd(0x04)),
+            Command::VolumeDown => Ok(FramePayload::from_cmd(0x05)),
+            Command::SetVolume(volume) => Command::set_volume(volume),
+            Command::SetEqualizerPreset(preset) => Ok(FramePayload::new(0x07, preset as u16)),
+            Command::RepeatTrack(track_num) => Ok(FramePayload::new(0x08, track_num)),
+            Command::SetPlaybackSource(source) => Ok(FramePayload::new(0x09, source as u16)),
+            Command::EnterStandby => Ok(FramePayload::from_cmd(0x0A)),
+            Command::ExitStandby => Ok(FramePayload::from_cmd(0x0B)),
+            Command::Reset => Ok(FramePayload::from_cmd(0x0C)),
+            Command::Resume => Ok(FramePayload::from_cmd(0x0D)),
+            Command::Pause => Ok(FramePayload::from_cmd(0x0E)),
+            Command::PlayFromFolder(folder, track) => Command::play_from_folder(folder, track),
+            Command::SetVolumeGain(state, volume) => Command::set_volume_gain(state, volume),
+            Command::RepeatAll(state) => Ok(FramePayload::new(0x11, state as u16)),
+            Command::PlayFromMp3Folder(track_num) => Ok(FramePayload::new(0x12, track_num)),
+            Command::PlayFromAdvertFolder(track_num) => Ok(FramePayload::new(0x13, track_num)),
+            Command::PlayLargeFolder(folder, track) => Command::play_large_folder(folder, track),
+            Command::SkipAdvertisement => Ok(FramePayload::from_cmd(0x15)),
+            Command::Stop => Ok(FramePayload::from_cmd(0x16)),
+            Command::RepeatFolder(folder) => Command::repeat_folder(folder),
+            Command::PlayRandom => Ok(FramePayload::from_cmd(0x18)),
+            Command::RepeatCurrentTrack(state) => {
+                Ok(FramePayload::new(0x19, state.toggle() as u16))
+            }
+            Command::SetDac(state) => Ok(FramePayload::new(0x1A, state.toggle() as u16)),
+            Command::Raw(cmd, param1, param2) => Ok(FramePayload::new(
+                cmd,
+                u16::from_be_bytes([*param1, *param2]),
+            )),
         }
     }
 }
