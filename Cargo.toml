@@ -3,6 +3,7 @@ name = "dfplayer-esp32"
 version = "0.3.0"
 edition = "2024"
 description = "A library for communicating with the DFPlayer Mini module"
+authors = ["Binar Nugroho <binarnugroho775@gmail.com>"]
 keywords = ["dfplayer", "esp32", "IoT"]
 license = "MIT"
 repository = "https://github.com/crazydw4rf/dfplayer-esp32"
@@ -12,6 +13,10 @@ esp-idf-hal = "0.47"
 thiserror = "2.0"
 log = "0.4"
 derive_more = { version = "2.1", features = ["try_from", "deref", "from"] }
+
+[dev-dependencies]
+esp-idf-svc = "0.53"
+anyhow = "1.0"
 
 [profile.release]
 opt-level = "s"
