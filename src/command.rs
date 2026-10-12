@@ -23,7 +23,7 @@ pub enum Command {
     /// Sets the volume level (0–30).
     SetVolume(u8),
 
-    /// Sets the equalizer preset (Normal, Pop, Rock, Jazz, Classical, Bass).
+    /// Sets the equalizer preset (Normal, Pop, Rock, Jazz, Classic, Bass).
     SetEqualizerPreset(EqualizerPreset),
 
     /// Repeats a single track (1–3000).

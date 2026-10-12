@@ -255,7 +255,7 @@ impl<'d> DfPlayer<'d> {
         self.read_response()
     }
 
-    /// Queries the current equalizer preset (Normal, Pop, Rock, Jazz, Classical, Bass).
+    /// Queries the current equalizer preset (Normal, Pop, Rock, Jazz, Classic, Bass).
     pub fn equalizer_preset(&self) -> Result<EqualizerPreset> {
         self.send_command(Query::EqualizerPreset)?;
         self.read_response()

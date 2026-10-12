@@ -126,7 +126,7 @@ pub enum EqualizerPreset {
     Rock = 0x02,
     /// Jazz music equalizer preset.
     Jazz = 0x03,
-    /// Classical music equalizer preset.
+    /// Classic music equalizer preset.
     Classic = 0x04,
     /// Bass boost equalizer preset.
     Bass = 0x05,

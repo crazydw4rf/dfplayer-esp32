@@ -14,7 +14,7 @@ pub enum Query {
     /// Queries the current output volume level (0–30).
     Volume,
 
-    /// Queries the current equalizer preset (Normal, Pop, Rock, Jazz, Classical, Bass).
+    /// Queries the current equalizer preset (Normal, Pop, Rock, Jazz, Classic, Bass).
     EqualizerPreset,
 
     /// Queries the total number of audio tracks available on the USB flash drive.
